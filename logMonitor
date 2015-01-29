@@ -1,0 +1,107 @@
+#!/bin/bash
+#
+# LogMonitor
+#
+# chkconfig: - 90 10
+# description: logMonitor will send you the content of a log \
+#              when it matches a given regexp.
+#
+# config: /etc/logMonitor.conf
+#
+
+
+# Source function library.
+. /etc/init.d/functions
+
+# load configuration
+test -f /etc/logMonitor.conf && . /etc/logMonitor.conf
+
+prog="LogMonitor"
+
+RETVAL=0
+
+# die function doesn't exist, so let's create one
+die () {
+	echo "$@" 1>&2 ; exit 1;
+}
+
+## let's do some sanity checks ...
+# check if the recipient email address is set
+if [ -z $RCPT ] || [ -z $REGEX ]; then
+	die "Unconfigured $prog Edit /etc/logMonitor.conf with the proper values\n"
+fi
+
+# make sure that we can read the log files
+for i in $LOGFILE ; do
+	test -r $i || die "can't read the log file $i\n";
+done
+
+#define some default variables if they have not been configured
+if [ -z $TMPFILE ]; then
+	TMPFILE='/tmp/server.tmp'
+fi
+
+if [ -z $TAILPID ]; then
+	TAILPID='/var/run/logMonitor/tail.pid'
+fi
+
+if [ -z $INOTIFYPID ]; then
+	INOTIFYPID='/var/run/logMonitor/inotify.pid'
+fi
+
+if [ -z $LOG2MAILPID ]; then
+	LOG2MAILPID='/var/run/logMonitor/log2mail.pid'
+fi
+
+
+start () {
+	echo -n $"Starting $prog"
+
+	touch $TMPFILE
+
+	tail -f $LOGFILE >>$TMPFILE &
+	echo $! >$TAILPID
+
+	/usr/local/bin/log2mail -f $TMPFILE -x $REGEX -r $RCPT -p $INOTIFYPID &
+	echo $! >$LOG2MAILPID
+
+	RETVAL=$?
+	[ $RETVAL -eq 0 ] && success || failure $"$prog start"
+	echo
+	return $RETVAL
+}
+
+stop () {
+	echo -n $"Stopping Log Monitor"
+
+	kill `cat $TAILPID`
+	kill `cat $LOG2MAILPID`
+
+	sleep 2
+
+	kill `cat $INOTIFYPID`
+
+	rm -f $TMPFILE $INOTIFYPID $TAILPID $LOG2MAILPID
+
+	RETVAL=$?
+	[ $RETVAL -eq 0 ] && success || failure $"$prog stop"
+	echo
+	return $RETVAL
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart)
+		stop
+		start
+		;;
+	*)
+		echo $"Usage: $prog {start|stop|restart}"
+esac
+
+exit 0

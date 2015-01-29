@@ -1,0 +1,108 @@
+#!/bin/bash -
+#===============================================================================
+#
+#          FILE: log2mail
+#
+#         USAGE: ./log2mail -f <file> -x <regex> -r <mail> -p <pidfile>
+#
+#   DESCRIPTION: log2mail will monitor <file> for changes and look for
+#		a string matching <regex>, if found it will send it to <email>
+#		if there is no match, <file> is emptied
+#
+#	NOTE:	WARNING!
+#		Don't run the script against a log file, as it erased after
+#		each check. You should rather tail you log into a tmp file
+#
+#  REQUIREMENTS: inotify-tools, tail, grep, mailx
+#        AUTHOR: Fred Badel, fred@never-mind.ch
+#  ORGANIZATION:
+#       CREATED: 03/01/2013 01:44:09 PM CET
+#===============================================================================
+
+# bash really miss a die function
+die () {
+	echo "$@" 1>&2 ; exit 1;
+}
+
+# print script usage
+usage ()
+{
+	cat << EOF
+	usage: $0 options
+
+	This script parse a file for a given regexp and send it by mail
+
+	OPTIONS:
+	-f file	: path to the file
+	-x regex : regex to look for
+	-r email : recipient email address
+	-p pidfile : Inotify PID file
+EOF
+}	# ----------  end of function usage  ----------
+
+# check the number of args
+if [ $# -lt 1 ] ; then
+	usage
+	exit 1
+fi
+
+# assign args to varaible
+while getopts hp:r:x:f: options; do
+	case $options  in
+		f) TMPFILE=$OPTARG
+		;;
+
+		x) REGEX=$OPTARG
+		;;
+
+		r) RCPT=$OPTARG
+		;;
+
+		p) IPID=$OPTARG
+		;;
+
+		*) usage
+		exit 1
+		;;
+
+	esac    # --- end of case ---
+done
+
+## let's do some sanity checks:
+# check that mandatory variables have a value
+if [ -z $TMPFILE ] || [ -z $REGEX ] || [ -z $RCPT ]; then
+	usage
+	exit 1
+fi
+
+# if no pid file, set it to /dev/null
+if [ -z $IPID ]; then
+	IPID='/dev/null'
+fi
+
+# is inotifywait executable
+if [ ! -x `which inotifywait` ]; then
+	die "can't execute inotifywait, I am giving up"
+fi
+
+# can we read the file
+if [ ! -r $TMPFILE ] ; then
+	die "Can't access $TMPFILE, I am giving up"
+fi
+
+## end of sanity checks
+
+## main prog:
+while eval "inotifywait -q -e modify $TMPFILE  >/dev/null 2>&1 & " && echo $! >$IPID
+do
+	sleep 10
+	if grep -E $REGEX $TMPFILE; then
+		cat $TMPFILE | mailx -s "Exceptions detected on `hostname`" $RCPT
+		cat /dev/null >$TMPFILE
+	else
+		cat /dev/null >$TMPFILE
+	fi
+done > /dev/null 2>&1
+
+
+
